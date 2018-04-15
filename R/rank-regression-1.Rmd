@@ -1,0 +1,660 @@
+---
+author: ""
+date: ""
+title: ""
+output:
+  html_document:
+    toc: false
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+knitr::opts_chunk$set(
+  echo = TRUE,
+  # echo = FALSE,
+  # cache = TRUE,
+  include = FALSE,
+  # results = "markdown",
+  # results = "hide",
+  fig.align = "center",
+  # fig.show = "asis",
+  fig.width = 6,
+  fig.height = 6,
+  # out.width = 6,
+  # out.height = 6,
+  warning = FALSE,
+  message = FALSE
+)
+
+```
+
+```{r packages}
+library("dplyr")
+library("ggplot2")
+library("tidyr")
+library("teplot")
+```
+
+```{r viz_setup}
+# library("ggplot2")
+theme_base <-
+  teplot::theme_te_b_facet(
+    plot_title_size = 16,
+    subtitle_size = 14,
+    axis_title_size = 12,
+    caption_face = "plain",
+    caption_size = 12
+  )
+theme_tile <-
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 90)
+  )
+labs_tile <-
+  labs(x = NULL, y = NULL)
+```
+
+__NOTE:__ This write-up is split into two parts. This first part constitutes the "important"
+part of the analysis, while the second part is really just supplementary.
+
+## The Problem
+
+I have a bunch of data that can be categorized into many small __groups__.
+Each small group has a set of __values__ for ordered __intervals__.
+Having observed that values most groups seem to increase
+I hypothesize that their is a statistically-significant,
+monotonically increasing trend.
+
+### An Analogy
+
+To make this abstract talk a bit more relatable, imagine this scenario:
+There are many companies (__groups__) selling products in 
+an industry that is on the verge of widespread growth.
+Each company sets a projection (not a goal) for end-of-year sales (__value__).
+and adjust this projection once per quarter (i.e. four times a year) (__interval__)
+after analyzing their to-date sales.
+Having observed that
+most companies that follow this scheme tend to increase
+their goals for next-quarter sales (based on an initial, beginning-of-the-year
+projection that is too low),
+the market analyst (me) wonders if there is a non-trivial, monotonic trend. [^hypothesis]:
+
+
+[^hypothesis]:
+The market analyst does not necessarily hypothesize
+why annual projections tend to be high (i.e. perhaps due to over-confidence)
+
+To summarize how the "variables" in this analogy relate to my abstract description of the situation,
+
++ groups = companies
++ value = sales
++ interval = quarter-year
+
+(Actually, there is one more variable in this context, given that I am interested in
+relative value---the __rank__ of the value, relative to the other values.)
+
+And, to make the example concrete, here is what the data might look like in `R`.
+
+```{r data_ex}
+set.seed(42)
+n <- 4L
+ya <- sort(round(runif(n, min = 1L, max = 10L), 1), decreasing = FALSE)
+yb <- sort(round(runif(n, min = -1L, max = 1L), 2), decreasing = FALSE)
+yc <- sort(sample(100L:10000L, size = n, replace = FALSE), decreasing = FALSE)
+yd <- sort(sample(-100L:100L, size = n, replace = FALSE), decreasing = FALSE)
+
+# Purposely make some groups non-monotonic.
+yc <- yc[c(2, 1, 2, 4)]
+yd[3] <- 400
+
+data_ex <-
+  tibble::tibble(
+    company = sort(rep(LETTERS[1:n], n)),
+    quarter = rep(1L:n, n),
+    sales = c(ya, yb, yc, yd)
+  )
+
+```
+
+```{r data_ex_show, include = TRUE}
+data_ex %>% 
+  mutate_at(vars(quarter), funs(paste0("q", .))) %>% 
+  tidyr::spread(quarter, sales)
+```
+
+```{r viz_ex, include = TRUE, echo = FALSE, fig.width = 6, fig.height = 6}
+data_ex %>% 
+  ggplot(aes(x = quarter, y = sales, color = company)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = scales::dollar) +
+  teplot::scale_color_te() +
+  facet_wrap(~company, scales = "free_y") +
+  theme_base +
+  theme(legend.position = "none", panel.background = element_rect()) +
+  labs(
+    title = "Sales Per Quarter",
+    caption = "Note that the \"free\" y-axis helps overcome the difference in magnitude among values."
+  )
+```
+
+
+### (Bad) Solution: Linear Regression
+
+Just at first thought, running a univariate
+[linear regression](https://en.wikipedia.org/wiki/Linear_regression) might seem like a good way
+of attacking this problem.
+However, there are a couple of basic "gotchas" that make ordinary linear regression
+a not-so-great idea for this scenario:
+
++ There are not many intervals (i.e. independent variables) per group.
+(This condition inherently makes any kind of model---not just a linear regression one---sensitive
+to sampling bias.)
+
++ The values across groups might have very different magnitudes.
+(Thus, trying to create a single, general model that groups all of the data and
+uses the group labels as a categorical independent variable would likely lead to unreliable results.)
+
++ The values themselves might be very volatile for a single group.
+(This might be interpreted as a violation of the
+[normal distribution assumption of linear regression](https://www.statisticssolutions.com/assumptions-of-linear-regression/).
+Additionally, if the values are truly monotonic, the assumption of no autocorrelation
+might also be violated.)
+
+Aside from these caveats,
+the value for a given interval is not relevant---rather,
+its relationship with all other values is, and, more specifically,
+its relationships with the previous and subsequent values.
+Additionally, prediction is not the concern---rather, quantification of trend is.
+(While regression certainly can help with trend identification,
+its capability to create predictions is perhaps its better use.)
+
+### (Better) Solution: _Spearman's Rho_
+
+Given the nature of the data (which one might say is non linear) and my
+intent to quantify ordinality between two variables, it turns out that
+[_Spearman's rho_](https://en.wikipedia.org/wiki/Spearman%27s_rank_correlation_coefficient),
+in theory, provides exactly the measurement that I want---it quantifies the association
+between parised samples using the ranking of the variables (not their values).
+Additionally, it can be used to calculate statistical significance (i.e. a p-value)
+(traditionally, using a [t-test](https://en.wikipedia.org/wiki/Student%27s_t-test)). 
+Nonetheless, even though this metric seems promisable, it will certainly be
+sensitive to the small samples of each group (assuming that it is calculated
+for each group).
+
+```{r mtcars_corrr, eval = FALSE}
+mtcars %>%
+  # ggplot(aes(x = mpg, y = hp)) +
+  # geom_point()
+  GGally::ggcorr(method = c("pairwise", "spearman"), label = TRUE)
+
+
+corestij <- function(i, j, data) {
+  cor.test(data[, i], data[, j], method = "spearman")$estimate
+}
+corpij <- function(i, j, data) {
+  cor.test(data[, i], data[, j], method = "spearman")$p.value
+}
+corest <- Vectorize(corestij, vectorize.args = list("i", "j"))
+corp <- Vectorize(corpij, vectorize.args = list("i", "j"))
+n <- ncol(mtcars)
+cors <-
+  outer(1:n, 1:n, corest, data = mtcars) %>% 
+  tibble::as_tibble() %>% 
+  purrr::set_names(names(mtcars)) %>% 
+  mutate(rowname = names(mtcars)) %>% 
+  select(rowname, everything()) %>% 
+  gather(col, value, -rowname)
+cors %>% 
+  ggplot(aes(x = rowname, y = col)) +
+  geom_tile(aes(fill = value)) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "grey95", midpoint = 0) +
+  coord_equal() +
+  theme_base +
+  theme_tile +
+  labs_tile
+```
+
+
+### Another Solution: Custom Heuristic
+
+So, what can be done? Well,
+even with the hope that the Spearman's rho metric provides for quantification and significance inference,
+I thought that I would try to create some kind of easily-understandable heuristic
+that I might be able to explain to someone else 
+without having to delve into statistical theory.
+Nonetheless, I would be ignorant to not compare (and validate) the results of my heurisitc
+with those of statisical theory.
+
+## Devising a Heuristic
+
+Having this plan in mind, I began to think about how I would define my heuristic,
+which, in essence, tries to quantify [__monotocity__](https://en.wikipedia.org/wiki/Monotonic_function).
+But what exactly constitutes monotocity? Suprisingly, that's a more complex
+question than it might seem. [^mntc_complexity]
+(For example, did you know that numbers may be strictly or weakly monotic?)
+
+[^mntc_complexity]:
+I'll leave the reader to dive into all of the theory.
+
+For my purposes, I don't necessarily care if the set of values
+is _strictly_ increasing or decreasing, but they should be 
+"sufficiently" increasing or decreasing.
+For example, while it is clear that the sequence `1`, `2`, `3`, `4` is strictly monotonic (increasing)
+and the sequence `1`, `2`, `4`, `3` is not, I would consider the latter sufficiently monotonic.
+On the the hand, 
+I would consider something like  `4`, `2`, `3`, `1` because the `1` and `4` are
+"badly" misplaced in one another's appropriate places, which are at the extreme ends of the sequence.
+Moreover, if I was intent identifying
+increasing monoticity (as opposed to decreasing monotocity),
+I would consider `4`, `3`, `2`, `1` "bad", even though it is strictly
+monotonically decreasing. But what about something like `1`, `4`, `3`, `2` (again, assuming
+that I am evaluating increasing monotocity)? Even though the
+`2` and `4` are swapped, I might still consider this sequence sufficiently monotonic 
+because the `1` and `3` are placed correctly and the `2` and `4` are not "too far apart".
+
+It's easy to see how having some kind of formal definition/calculation/criteria for
+monotocity is handy.
+
+### The "Algorithm"
+
+After some thinking,
+I came up with the following algorithm (if one can even call it that).
+
+(__NOTE:__ I explicity list the variable names that I use in the code implementation to help
+with orientation.)
+
+1. Given an `n`-length sequence of arbitrary values, assign each value
+an integer value between `1` and `n` to represent its "actual" rank. This rank
+is to be assigned based on relative value in
+the set of [real numbers](https://en.wikipedia.org/wiki/Real_number). [^rank_init]
+
++ In the machine learning setting, this set of ranks is the 
+dependent variable (i.e. `y`) to predict;
++ In the example situation described before, it equates to the rank that
+would be assigned to the quarterly interval based on sales relative to the other quarters.
++ In the simulation that I run below, this is `y0`.
+
+2. Create a matrix of all permutations of actual rank and "assigned" rank.
+To be clear, this assigned rank is independent of the actual rank and value.
+Also, to make things straightforward, these assigned ranks should be transformed to
+use only the same set of possible rank values dictated by the actual ranks (i.e. integers
+between 1 and `n`).
+
++ In the machine learning setting, this assigned rank is the 
+independent variable (i.e. `x`) used as a predictor.
++ In the example, it is the quarterly interval.
++ In the simulation that follows, assigned rank is `x0`, and the matrix (actually, a `tibble`)
+of combinations is `data_permn`.
+
+3. Calculate the absolute difference between the actual and assigned ranks
+for each value in the sequence.
+Subtract this distance from the maximum rank value in the sequence. This value is what I call the
+"inverse monotonic distance" (`mntc_distinv` in the following code).
+
+4. Repeat the calculation of inverse monotonic distance for all groups (`grp`) of
+"actual" (`x0`) and "guessed" (`y0`) ranks.
+
+5. Sum up the inverse monotonic distance for each value in the permutation group and
+take the average of this sum for each group. [^sum_or_avg]
+Rescale this per-group value to a 0 to 1 basis. [^rescale] (in the code that follows,
+I re-use the variable name `mntc_distinv` for this transformed value.)
+
+6. Identify any group (`grp`) corresponding to a sum-averaged-rescaled value
+(`mntc_distinv`) in the upper 50% quantile of all values
+(i.e. assigned the value `"(0.5,1]"` for the `mntc_tier2` variable)
+as "sufficiently" __monotonic__. (This `mntc_tier2` varaible can be interpreted as the heuristic.)
+
+[^rank_init]:
+In reality, the rank values could also be any arbitrary value on the real number scale.
+
+[^sum_or_avg]:
+A sum of sums (instead of an average of sums) could be used here and the subsequent
+results would not change.
+
+[^rescale]:
+This is not completely necessary, but I believe that it makes the computation(s) and
+the calculated values
+"generalizable" for any `n`-length sequence.
+
+Notably, even though the result set is split at the 50% thresshold (which is a subjective choice),
+this does not mean that 50& of all possible groups are classified as 50&.
+(According to this method, only 25% are.)
+
+## Implementing the Heuristic
+
+Ok, that is enough discussion. What follows is the implementation.
+As a note to the reader, in order to keep focus on how the code implements methodology,
+I recommend that the reviewing the code but not
+worrying too much about the details of each component (such as the internal workings
+of my custom functions). Rather, I'd recommend inspecting in detail only the parts
+that are printed out (and going back later to understand the complexities, if curious).
+
+```{r packages_show, include = TRUE}
+library("dplyr")
+library("ggplot2")
+library("tidyr")
+# These packages are used, but their functions are called explicitly.
+# library("purrr")
+# library("broom")
+# library("combinat")
+```
+
+The only
+choice that I need to make to begin is the length of the set of values (i.e. `n`),
+which should a "small" integer.
+I'll choose `4`, simply because `3` seems like it is "too small" and because subsequent
+visualization(s) becomes "cluttered" (and interpretation becomes less direct)
+if a number `5` or greater is chosen. [^trial_error] (Nonetheless, the methodology
+and results remain valid for any integer.)
+
+[^trial_error]:
+I realized this through some trial and error.
+
+```{r params}
+n <- 4L
+```
+
+```{r params_info}
+n_combns <- factorial(n) * factorial(n)
+n_rows <- n * n_combns
+```
+
+
+The following code chunk corresponds to steps 1 and 2 in my methodology, which are basically
+just set-up steps. [^steps]
+
+Note(s) about the following code chunk:
+
++ Although the values to be evaluated for monoticity (`x0`) could be any real numbers,
+I'm using values between `1` and `n` because my methodology dictates that the arbitrary
+set of values would need to be transformed to this range anyways. When transformed to this
+range, the values should be interprted as ranks (the "acutal" ranks).
++ Like the "actual" `x0` ranks (representing the order of the original, arbitrary values),
+the "guessed" `y0` ranks could technically be any real numbers, but they
+would need to be transformed to the `1`-to-`n` range, so I do that directly.
++ The number of combinations of "actual" (`x0`) and "guessed" (`y0`) rank pairs is
+equal to `n! * n!` (i.e. `r n_combns`).
+For my implementation, the data.frame `data_permns` actually has 
+`n! * n! * n` (`r n_rows`) rows (because it is arranged in a "long" format).
++ `grp_x` and `grp_y` (and the combination of the two in the `grp` column) 
+identify the `n`-length groups of pairs of `x0` and `y0` ranks. These are primarily
+useful for interpretability and are not actually relevant for computations.
+
+[^steps]:
+The other steps really make up the "core" of the algorithm.)
+
+```{r setup_sim, include = TRUE}
+setup_data <- function(n = 1L) {
+  
+  n_seq <- seq(1L, n, by = 1L)
+  
+  combs <-
+    combinat::permn(n_seq) %>%
+    purrr::map( ~ paste(.x, collapse = "")) %>%
+    unlist() %>%
+    as.integer()
+  data_xy <-
+    tibble(grp_x = combs, grp_y = combs) %>%
+    expand(grp_x, grp_y) %>%
+    mutate(grp = paste0("x", grp_x, "y", grp_y))
+  
+  into_seq <- seq(1L, n, by = 1L) %>% as.character()
+  sep_seq <- seq(1L, n - 1L, by = 1L)
+  wrangle_data_xy <-
+    function(data = NULL, which = NULL) {
+      col_grp <- rlang::sym(paste0("grp_", which))
+      col_0 <- rlang::sym(paste0(which, "0"))
+      data %>%
+        separate(!!col_grp, into_seq, sep = sep_seq, remove = FALSE) %>%
+        gather(idx, !!col_0, matches("^[0-9]$")) %>%
+        mutate_at(vars(idx, !!col_0), funs(as.integer))
+    }
+  inner_join(data_xy %>% wrangle_data_xy("x"),
+               data_xy %>% wrangle_data_xy("y")) %>%
+    select(-idx) %>%
+    arrange(grp_x, grp_y)
+}
+
+data_permns <- setup_data(n = n)
+data_permns
+```
+
+Now, I implement the initial calculation of "inverse monotonic distance" (`mntc_distinv`).
+
+Note(s) about the following code chunk:
+
++ The `mntc` variable is a "running" binary `1` or `0` to indicate whether or not
+`y0` is monotonic up throught its position in the sequence. (It does not differentiate
+between increasing or decreasing.)
+
+
+```{r data_mntc, include = TRUE}
+# x0 is really only necessary if x0 skips over numbers in a range (i.e. is not "complete" for each group).
+data_mntc <-
+  data_permns %>%
+  group_by(grp) %>%
+  arrange(x0, .by_group = TRUE) %>% 
+  mutate(x0 = row_number()) %>% 
+  mutate(mntc = ifelse((y0 == cummax(y0)) | (y0 == cummin(y0)), 1L, 0L)) %>% 
+  mutate(mntc_distinv = as.integer(x0 * (max(x0) - abs(x0 - y0)))) %>% 
+  ungroup()
+data_mntc
+```
+
+
+```{r data_mntc_debug, eval = FALSE}
+data_mntc %>% count(mntc, sort = TRUE)
+# data_mntc %>% count(mntc_wt, sort = TRUE)
+data_mntc %>% count(mntc_distinv, sort = TRUE)
+# data_mntc %>%
+#   widyr::pairwise_dist(
+#     item = grp,
+#     feature = x0,
+#     value = y0
+#   ) %>% 
+#   arrange(desc(distance)) %>% 
+#   count(distance, sort = TRUE)
+
+```
+
+
+Next is the calculation of the transformed (i.e. summed-averaged-rescaled) version 
+of the "inverse monotonic distance" (`mntc_distinv`),
+as well as the split of the `mntc_distinv` into upper and lower 50% quantiles (`mntc_tier2`).
+
+```{r summ_mntc, include = TRUE}
+unitize <- function(x = NULL) {
+  (x - min(x)) / (max(x) - min(x))
+}
+summ_mntc <-
+  data_mntc %>%
+  group_by(grp) %>% 
+  summarise_at(vars(mntc_distinv), funs(mean)) %>% 
+  ungroup() %>% 
+  mutate_at(vars(mntc_distinv), funs(unitize)) %>% 
+  mutate(mntc_tier2 = cut(mntc_distinv, 2)) %>%
+  arrange(desc(mntc_distinv))
+summ_mntc
+```
+
+```{r summ_mntc_debug, eval = FALSE}
+summ_mntc %>% count(mntc_distinv, sort = TRUE)
+summ_mntc %>% count(mntc_tier2, sort = TRUE)
+# summ_mntc %>%
+#   select(-matches("tier")) %>% 
+#   gather(metric, value, starts_with("mntc")) %>% 
+#   # group_by(metric) %>% 
+#   # summarise_at(vars(value), funs(mean)) %>% 
+#   # ungroup() %>% 
+#   # count(mntc_distinv, sort = TRUE) %>%
+#   ggplot(aes(x = value, fill = metric)) +
+#   # geom_col()
+#   geom_histogram() +
+#   facet_wrap(~metric)
+# summ_mntc %>%
+#   select(matches("^mntc")) %>%
+#   select_if(is.numeric) %>%
+#   corrr::correlate()
+```
+
+Exactly how many values make up each 50% quantile?
+
+```{r summ_mntc_cnts, include = TRUE}
+summ_mntc %>% count(mntc_tier2, sort = TRUE)
+```
+And what does the distribution of all "inverse monotonic distance" values look like?
+
+```{r viz_mntc_distinv, eval = FALSE}
+n_bins <- length(unique(summ_mntc$mntc_distinv))
+
+viz_mntc_distinv <-
+  summ_mntc %>%
+  ggplot(aes(x = mntc_distinv)) +
+  geom_histogram(bins = n_bins)
+viz_mntc_distinv
+```
+
+```{r viz_summ_mntc, include = TRUE, echo = FALSE, fig.height = 10, fig.width = 10}
+add_grps_xy <- function(data = NULL) {
+  data %>%
+    inner_join(data_permns %>% select(grp, grp_x, grp_y), by = "grp") %>% 
+    mutate_at(vars(starts_with("grp_")), funs(as.character))
+}
+lab_title_summ_mntc <-
+  paste0(
+    "Rank Combinations (", n, "-Length Sequence) ",
+    "Identified as\n\"Sufficiently\" Monotonic (Increasing)"
+  )
+lab_caption_prefix <-
+  "Pairs identified as significant per "
+lab_caption_summ_mntc <-
+  paste0(lab_caption_prefix, "custom methodology marked with dot ('.').")
+
+viz_summ_mntc <-
+  summ_mntc %>%
+  add_grps_xy() %>% 
+  # mutate(lab = round(mntc_mean, 1)) %>% 
+  ggplot(aes(x = grp_x, y = grp_y)) +
+  geom_tile(aes(fill = mntc_distinv)) +
+  scale_fill_gradient2(low = "red", high = "green", mid = "grey95", midpoint = 0.5) +
+  geom_point(
+    data =
+      summ_mntc %>%
+      filter(mntc_tier2 == "(0.5,1]") %>%
+      add_grps_xy(),
+    shape = 20, size = 1
+  ) +
+  # geom_text(aes(label = lab), color = "black", fontface = "bold") +
+  coord_equal() +
+  theme_base +
+  theme_tile +
+  guides(fill = guide_legend(title = "Weighted\nMonotocity")) +
+  theme(legend.position = "right") +
+  labs_tile +
+  labs(
+    title = lab_title_summ_mntc,
+    caption = lab_caption_summ_mntc
+  )
+viz_summ_mntc
+```
+
+## Checking the Heuristic
+
+Ok, my heuristic seems valid, but how can I know for sure that it is reasonable?
+I mentioned before that _Spearman's rho_ should serve a good measure, so I'll take
+a look at it now.
+
+```{r summ_mntc_cortest, include = TRUE}
+summ_mntc_cortest <-
+  data_mntc %>%
+  group_by(grp) %>% 
+  nest() %>% 
+  mutate(cortest = purrr::map(data, ~broom::tidy(cor.test(.$x0, .$y0, method = "spearman")))) %>% 
+  unnest(cortest, .drop = TRUE) %>% 
+  select(grp, estimate, p.value)
+
+summ_mntc_joined <-
+  summ_mntc %>% 
+  inner_join(summ_mntc_cortest, by = "grp")
+summ_mntc_joined
+```
+
+```{r summ_mntc_cortest_alt, eval = FALSE}
+# # Alternatively... 
+# data_mntc %>%
+#   group_by(grp) %>% 
+#   summarize(
+#     cortest = cor.test(x0, y0)$estimate,
+#     p.value = cor.test(x0, y0)$p.value
+#   ) %>% 
+#   ungroup()
+# # Or...
+# data_mntc %>%
+#   group_by(grp) %>% 
+#   do(broom::tidy(cor.test(.$x0, .$y0, method = "spearman"))) %>% 
+#   ungroup()
+```
+
+
+What exactly is the distribution of _Pearson's rho_ estimates and p-values?
+
+```{r summ_mntc_joined_cnts, include = TRUE}
+summ_mntc_joined %>%
+  count(abs(estimate), p.value, sort = TRUE)
+```
+
+Note(s) about the above code chunk:
+
++ By taking the absolute value of the estimate, I am essentially treating
+monotonically increasing and decreasing as equal.
++ There are only `n + 1` (i.e. `r n + 1` unique `abs(estimate)`s and `p.value`s.
+This result is generally true for the simulation performend.
+(For example, if I chose `n = 5` initially, then there would be `6` unique values of each metric.)
+
+Now, to understand how the _Pearson's rho_ estimate and p-values correspond to my hueristic,
+I'll simply overlay the combinations that are identified as significant to my
+previous heatmap of rank combinations. Because I'm erring on the side of flexibility
+in defining "sufficient" monotocity, I'll say that the pairs corresponding to the
+bottom two tiers of p-values
+(corresponding to `0.0833` and `0.33`) constitute "sufficient" monoticity. 
+
+```{r viz_summ_mntc_2, include = TRUE, echo = FALSE, fig.height = 10, fig.width = 10}
+lab_caption_summ_mntc_2 <-
+  paste0(
+    lab_caption_summ_mntc, "\n",
+    lab_caption_prefix, "Pearson's rho p.value < 0.33 marked with 'x'.\n",
+    lab_caption_prefix, "Pearson's rho p.value < 0.083 marked with asterisk ('*')."
+  )
+viz_summ_mntc_2 <-
+  viz_summ_mntc +
+  geom_point(
+    data =
+      summ_mntc_joined %>% 
+      add_grps_xy() %>% 
+      filter(estimate > 0) %>% 
+      filter(p.value < 0.4),
+    shape = 4, size = 3
+  ) +
+  geom_point(
+    data =
+      summ_mntc_joined %>% 
+      add_grps_xy() %>% 
+      filter(estimate > 0) %>% 
+      filter(p.value < 0.1),
+    shape = 8, size = 3
+  ) +
+  labs(caption = lab_caption_summ_mntc_2)
+viz_summ_mntc_2
+```
+
+```{r save_session}
+save.image(file = file.path("data", "rank-regression-1.RData"))
+```
+
+In conclusion, it looks like there is a large amount of overlap between my heuristic
+classification of "suficient" monoticity and that identified by a more statistical 
+approach--a t-test using _Spearman's rho_. In the end, I think I did more work than
+I really needed to, but I think, in all, it was a worthwhile exploration.
+

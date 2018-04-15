@@ -1,0 +1,424 @@
+---
+author: ""
+date: ""
+title: ""
+output:
+  html_document:
+    toc: false
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+knitr::opts_chunk$set(
+  echo = TRUE,
+  # echo = FALSE,
+  # cache = TRUE,
+  include = FALSE,
+  # results = "markdown",
+  # results = "hide",
+  fig.align = "center",
+  # fig.show = "asis",
+  fig.width = 6,
+  fig.height = 6,
+  # out.width = 6,
+  # out.height = 6,
+  warning = FALSE,
+  message = FALSE
+)
+
+```
+
+```{r restore_session}
+load(file.path("data", "rank-regression-1.RData"))
+library("dplyr")
+library("ggplot2")
+library("tidyr")
+library("teplot")
+```
+
+Even though I have already deduced that linear regression is not appropriate
+for quantifying monotocity with small samples of ordinal data,
+I still wondered what kind of results it might produce. Also, I figured
+that this might be a good opportunity to practice the
+["many models"](http://r4ds.had.co.nz/many-models.html) approach
+discussed in the [_R For Data Science_ book](http://r4ds.had.co.nz/) and refine
+my skills with the [`purrr` package](http://purrr.tidyverse.org/), 
+the [`broom` package](https://github.com/tidyverse/broom), and the
+"nest-mutate-unnest" idiom for working with list-columns.
+(I really enjoyed
+[this blog post breaking down variations of this idiom](https://coolbutuseless.bitbucket.io/2018/03/03/split-apply-combine-my-search-for-a-replacement-for-group_by---do/).)
+
+## Experimentation with Linear Regression
+
+Having realized that an "out-of-the-box" linear regression approach will not
+be useful, I'll try a couple different variations of transforming the data.
+In particular, I'll evaluate linear models after transforming the data
+in four different ways:
+
+1) Rescaling the x- and y-ranks to the range `[0, 1]`.
+(This seems like the best approach to me, but I'm not sure.)
+
+2) Rescaling to the range `[-1, 1]`.
+(This seems like it might generate similar results the previous method,
+but perhaps it is "more accurate" for representing values that may be negative.)
+
+3) Rescaling to the range `[1, 2 * n]`
+(I would not really bother attempting this in a non-experimental setting
+because it needlessly mangifies the range. Nonetheless, I am curious to see how
+the estimation of coefficients and p-values changes.)
+
+4) Rescaling to the range `[-2 * n, 2 * n]`.
+(As with the previous method, I would not really try this if I were serious,
+but I'm curious to see what it turns out.)
+
+
+Note(s) on the code chunk below:
+
++ I use the `purrr::partial()` function to reduce code redundancy.
+
++ I tend to prefer `dplyr::mutate_at()` (compared to `dplyr::mutate()`) in all
+situations where I am transforming variables in a data.frame,
+even if I am simply transforming a single variable. It offers a ton of flexibility
+when applying multiple functions across multiple columns.
+
+```{r data, include = TRUE}
+rescale1 <- purrr::partial(scales::rescale, to = c(0, 1))
+rescale2 <- purrr::partial(scales::rescale, to = c(-1, 1))
+rescale3 <- purrr::partial(scales::rescale, to = c(1, 2 * n))
+rescale4 <- purrr::partial(scales::rescale, to = c(-2 * n, 2 * n))
+data <-
+  data_permns %>%
+  group_by(grp) %>%
+  mutate_at(
+    vars(x0),
+    funs(
+      # x1 = scales::rescale(., to = c(0, 1)),
+      x1 = rescale1,
+      x2 = rescale2,
+      x3 = rescale3,
+      x4 = rescale4
+    )
+  ) %>%
+  mutate_at(
+    vars(y0),
+    funs(
+      y1 = rescale1,
+      y2 = rescale2,
+      y3 = rescale3,
+      y4 = rescale4
+    )
+  ) %>%
+  ungroup() %>%
+  arrange(grp)
+```
+
+
+```{r mod_info}
+mod_info <-
+  tribble(
+    ~mod_id, ~mod_desc,
+    "0", sprintf("range: [%0.0f, %0.0f]", 1, n),
+    "1", sprintf("range: [%0.0f, %0.0f]", 0, 1),
+    "2", sprintf("range: [%0.0f, %0.0f]", -1, 1),
+    "3", sprintf("range: [%0.0f, %0.0f]", 1, 10 * n),
+    "4", sprintf("range: [%0.0f, %0.0f]", -10 * n, 10 * n)
+  )
+
+```
+
+Now, after transforming the data, I can begin to implement the "many models" approach,
+beginning with model fitting.
+
+Note(s) on the code chunk below:
+
++ This is another ideal case for using `purrr::partial()`.
+(Unforutnatley, I could not quite figure out how to eliminate the 
+redundancy with the explicit formulas.)
+
++ I choose (perhaps foolishly) to not include an intercept term in the models
+because, theoretically, if the data is monotonic, the model should estimate the slope to be 1
+and the intercept to be 0. Thus, when the data is not actually monotonic, I can
+roughly estimate the relationship of the predictor and the response variables
+by how much the esimtated slope differs from 1, given that the intercept is held
+constant at 0. (This line of thinking may be completely non-sensical to the reader,
+but it makes sense to me.)
+
+
+```{r fit_lm, include = TRUE}
+partial_fit <- purrr::partial(purrr::map, .f = lm)
+fit <-
+  data %>%
+  group_by(grp) %>%
+  nest() %>%
+  mutate(
+    # fit0 = purrr::map(data_xy, ~lm(y0 ~ x0 + 0, data_xy = .x)),
+    fit0 = partial_fit(data, formula = as.formula(y0 ~ x0 + 0)),
+    fit1 = partial_fit(data, formula = as.formula(y1 ~ x1 + 0)),
+    fit2 = partial_fit(data, formula = as.formula(y2 ~ x3 + 0)),
+    fit3 = partial_fit(data, formula = as.formula(y2 ~ x3 + 0)),
+    fit4 = partial_fit(data, formula = as.formula(y4 ~ x4 + 0))
+  )
+
+```
+
+Next, I can easily extract the slope of each univariate model.
+
+Note(s) on the code chunk below:
+
++ Because I've chosen not to include an intercept in any of the models, each
+only has one term.
+
++ I use `round(., 4)` to prevent the p-value from printing out with 10+ decimal
+places for those models where the fit is nearly exact.
+
+```{r tidy_broom, include = TRUE}
+partial_tidy <- purrr::partial(purrr::map, .f = broom::tidy)
+terms <-
+  fit %>%
+  mutate(
+    # tidy0 = purrr::map(fit0, broom::tidy),
+    tidy0 = partial_tidy(fit0),
+    tidy1 = partial_tidy(fit1),
+    tidy2 = partial_tidy(fit2),
+    tidy3 = partial_tidy(fit3),
+    tidy4 = partial_tidy(fit4)
+  ) %>%
+  unnest(tidy0, tidy1, tidy2, tidy3, tidy4, .drop = TRUE) %>%
+  select(matches("grp|estimate|p\\.value")) %>%
+  mutate_if(is.numeric, funs(round(., 4)))
+terms %>% glimpse()
+```
+
+Finally, I can extract a one-line summary of each model from the fitted data.
+
+Note(s) on the code chunk below:
+
++ The p.value for the model itself is identical to that for the term.
+I believe that this is generally true for univariate linear regression models without an intercept.
+
++ I prefer the [adjusted R-squared](http://www.statisticshowto.com/adjusted-r2/) (`adj.r.squared`)
+over the "regular" R-squared `r.squared` value for summarizing a linear regression model
+because it attempts to account for the number of terms. (In this case, it does not
+actually matter because there is only one term.)
+
+```{r glance_broom, include = TRUE}
+partial_glance <- purrr::partial(purrr::map, .f = broom::glance)
+summ <-
+  fit %>%
+  mutate(
+    glance0 = partial_glance(fit0),
+    glance1 = partial_glance(fit1),
+    glance2 = partial_glance(fit2),
+    glance3 = partial_glance(fit3),
+    glance4 = partial_glance(fit4)
+  ) %>%
+  unnest(glance0, glance1, glance2, glance3, glance4, .drop = TRUE) %>%
+  select(matches("grp|adj.r\\.squared|p\\.value")) %>%
+  mutate_if(is.numeric, funs(round(., 4)))
+summ %>% glimpse()
+```
+
+```{r clean_unnested_funcs}
+add_metric_col_suffix <- function(x = NULL, suffix = "0") {
+  ifelse(!stringr::str_detect(x, "[0-9]$"), paste0(x, "0"), x)
+}
+
+clean_metric_col <- function(x = NULL) {
+  x %>%
+    stringr::str_replace_all("\\.", "") %>%
+    stringr::str_replace_all("([a-z])([0-9])$", "\\1_\\2")
+}
+clean_value_col <- function(x = NULL) {
+  x %>% round(4)
+}
+
+clean_unnested <- function(data = NULL) {
+  data %>%
+    gather(metric, value, -grp) %>%
+    mutate_at(vars(value), funs(clean_value_col)) %>%
+    mutate_at(vars(metric), funs(add_metric_col_suffix)) %>%
+    mutate_at(vars(metric), funs(clean_metric_col)) %>%
+    tidyr::separate(metric, c("metric", "mod_id"))
+}
+pull_distinctly <- function(data_xy = NULL, col = NULL) {
+  col <- rlang::enquo(col)
+  data_xy %>%
+    distinct(!!col) %>%
+    arrange(!!col) %>%
+    pull(!!col)
+}
+```
+
+```{r clean_unnested}
+terms_tidy <-
+  terms %>%
+  clean_unnested()
+summ_tidy <-
+  summ %>%
+  clean_unnested()
+```
+
+```{r mod_info_tidy_debug}
+terms_tidy %>%
+  filter(metric == "pvalue") %>%
+  left_join(
+    summ_tidy %>%
+      filter(metric == "pvalue"),
+    by = c("grp", "metric", "mod_id"),
+    suffix = c("_terms", "_summ")
+  ) %>% 
+  filter(value_terms != value_summ)
+```
+
+```{r mod_info_tidy}
+mod_info_tidy <-
+  bind_rows(
+    terms_tidy,
+    summ_tidy %>% filter(metric != "pvalue")
+  )
+mod_info_tidy %>%
+  tidyr::spread(mod_id, value) %>%
+  arrange(metric)
+```
+
+```{r viz_params_tile}
+wrangle_grp <- function(x = NULL) {
+  gsub("y", "\ny", x)
+}
+
+add_mod_desc_col <- function(data = NULL) {
+  data %>% 
+    left_join(mod_info, by = "mod_id") %>%
+    mutate_at(vars(mod_desc), funs(factor(., levels = mod_info$mod_desc)))
+}
+```
+
+
+```{r terms_gg_1, eval = FALSE}
+# metrics <- terms_tidy %>% pull_distinctly(metric)
+func_gg_1 <- function(data = NULL, metric = NULL) {
+  data %>%
+    filter(metric == metric) %>%
+    ggplot(aes(x = mod_desc, y = value, fill = grp)) +
+    geom_col(position = "stack") +
+    viridis::scale_fill_viridis(option = "B", discrete = TRUE) +
+    # scale_fill_brewer(palette = "Spectral") +
+    theme_minimal() +
+    theme_tile +
+    theme(legend.position = "none") +
+    labs_tile +
+    labs(title = metric)
+}
+
+terms_grobs_1 <-
+  mod_info_tidy %>%
+  add_mod_desc_col() %>% 
+  group_by(metric) %>%
+  nest() %>%
+  mutate(gg = purrr::map2(data, metric, func_gg_1))
+# terms_gg_1 <- gridExtra::arrangeGrob(grobs = terms_grobs_1$gg)
+# viz_terms_gg_1 <- grid::grid.draw(terms_gg_1)
+```
+
+```{r terms_gg_2, eval = FALSE}
+func_gg_2 <- function(data = NULL, metric = NULL) {
+  data %>%
+    filter(metric == metric) %>%
+    mutate(lab = round(value, 1)) %>%
+    mutate_at(vars(grp), funs(wrangle_grp)) %>% 
+    ggplot(aes(x = grp, y = mod_desc)) +
+    geom_tile(aes(fill = value), color = "black") +
+    # geom_text(aes(label = lab)) +
+    scale_fill_gradient2(low = "purple", high = "yellow", mid = "white", midpoint = 0.5) +
+    # facet_wrap(~grp_x) +
+    theme_minimal() +
+    theme_tile +
+    theme(legend.position = "none") +
+    labs_tile +
+    labs(title = metric)
+}
+terms_grobs_2 <-
+  mod_info_tidy %>%
+  add_mod_desc_col() %>% 
+  group_by(metric) %>%
+  # mutate(x0k = dense_rank(value)) %>%
+  nest() %>%
+  mutate(gg = purrr::map2(data, metric, func_gg_2))
+# terms_gg_2 <- gridExtra::arrangeGrob(grobs = terms_grobs_2$gg)
+# viz_terms_gg_2 <- grid::grid.draw(terms_gg_2)
+```
+
+What do the distribution of the model slope estimates and p-values for each data transformation
+look like?
+
+```{r viz_est_vs_pv, include = TRUE, echo = FALSE, fig.width = 10, fig.height = 10}
+viz_est_vs_pv <-
+  mod_info_tidy %>%
+  add_mod_desc_col() %>% 
+  filter(metric %in% c("estimate", "pvalue")) %>%
+  # filter(mod_id != "4") %>% 
+  spread(metric, value) %>% 
+  # count(mod_desc, estimate, pvalue, sort = TRUE) %>% 
+  ggplot(aes(x = estimate, y = pvalue, color = mod_desc)) +
+  # eom_point(aes(size = n)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  scale_color_brewer(palette = "Dark2") +
+  # coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
+  theme_minimal() +
+  guides(color = guide_legend("Model", override.aes = list(size = 5))) +
+  theme(legend.position = "bottom")
+# viz_est_vs_pv
+ggExtra::ggMarginal(viz_est_vs_pv, groupColour = TRUE, groupFill = TRUE)
+```
+
+
+```{r mod_0_debug, eval = FALSE}
+mod_info_tidy %>% 
+  filter(mod_id == "0") %>%
+  spread(metric, value) %>% 
+  mutate(signif = if_else(pvalue < 0.03, TRUE, FALSE)) %>% 
+  count(signif, sort = TRUE)
+mod_info_tidy %>% 
+  filter(mod_id == "0") %>%
+  spread(metric, value) %>% 
+  count(pvalue, sort = TRUE)
+```
+
+What about for the baseline data transformation?
+
+```{r summ_mntc_mod_0, include = TRUE}
+summ_mntc_mod_0 <-
+  summ_mntc %>% 
+  left_join(
+    mod_info_tidy %>% 
+      filter(mod_id == "0") %>% 
+      select(-mod_id) %>% 
+      spread(metric, value),
+    by = "grp")
+ summ_mntc_mod_0 %>% 
+   select(matches("mntc|estimate|pvalue|adjrsquared")) %>% 
+   select_if(is.numeric) %>% 
+   corrr::correlate()
+```
+
+```{r viz_summ_mntc_mod_0, include = TRUE, echo = FALSE, fig.height = 10, fig.width = 10}
+lab_caption_summ_mntc_mod_0 <-
+  paste0(
+    lab_caption_summ_mntc_2, "\n",
+    lab_caption_prefix, "linear regression marked with square outline."
+  )
+viz_summ_mntc_mod_0 <-
+  viz_summ_mntc_2 +
+  geom_point(
+    data =
+      summ_mntc_mod_0 %>%
+      mutate(signif = if_else(pvalue < 0.03, TRUE, FALSE)) %>% 
+      filter(signif == TRUE) %>% 
+      add_grps_xy(),
+    shape = 0, size = 5
+  ) +
+  labs(caption = lab_caption_summ_mntc_mod_0)
+viz_summ_mntc_mod_0
+```
+
