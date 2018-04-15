@@ -28,6 +28,16 @@ knitr::opts_chunk$set(
 
 ```
 
+```{r params}
+params <-
+  list(
+    dir_data = "data",
+    dir_viz = "figs",
+    export_viz = TRUE
+  )
+```
+
+
 ```{r packages}
 library("dplyr")
 library("ggplot2")
@@ -37,22 +47,34 @@ library("teplot")
 
 ```{r setup_vars_funcs}
 # library("ggplot2")
-theme_base <-
+theme_base <- function() {
   teplot::theme_te_b_facet(
-    plot_title_size = 16,
+    base_size = 12,
+    plot_title_size = 18,
     subtitle_size = 16,
-    axis_title_size = 16,
+    axis_title_size = 12,
     caption_face = "plain",
-    caption_size = 16
-  )
-theme_tile <-
+    caption_size = 12,
+    plot_margin = margin(2, 2, 2, 2)
+  ) +
   theme(
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    axis.text.x = element_text(angle = 90)
+    legend.text = element_text(size = 12)
   )
+}
+
+theme_tile <-
+  function() {
+  theme_base() +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 90)
+    )
+}
 labs_tile <-
-  labs(x = NULL, y = NULL)
+  function() {
+    labs(x = NULL, y = NULL)
+  }
 
 create_kable <-
   function(data = NULL, num_show = 10) {
@@ -157,7 +179,7 @@ data_ex %>%
   scale_y_continuous(labels = scales::dollar) +
   teplot::scale_color_te() +
   facet_wrap(~company, scales = "free_y") +
-  theme_base +
+  theme_base() +
   theme(legend.position = "none", panel.background = element_rect()) +
   labs(
     title = "Sales Per Quarter",
@@ -289,9 +311,9 @@ cors %>%
   geom_tile(aes(fill = value)) +
   scale_fill_gradient2(low = "blue", high = "red", mid = "grey95", midpoint = 0) +
   coord_equal() +
-  theme_base +
-  theme_tile +
-  labs_tile
+  theme_base() +
+  theme_tile() +
+  labs_tile()
 ```
 
 
@@ -613,7 +635,7 @@ viz_mntc_distinv <-
   summ_mntc %>%
   ggplot(aes(x = mntc_distinv)) +
   geom_histogram(bins = 20) +
-  theme_base +
+  theme_base() +
   labs(title = lab_title_mntc_distinv)
 viz_mntc_distinv
 ```
@@ -650,11 +672,11 @@ viz_summ_mntc <-
   ) +
   # geom_text(aes(label = lab), color = "black", fontface = "bold") +
   coord_equal() +
-  theme_base +
-  theme_tile +
+  theme_base() +
+  theme_tile() +
   guides(fill = guide_legend(title = "Weighted\nMonotocity")) +
   theme(legend.position = "right") +
-  labs_tile +
+  labs_tile() +
   labs(
     title = lab_title_summ_mntc,
     caption = lab_caption_summ_mntc
@@ -676,10 +698,12 @@ a look at it now.
 ```{r summ_mntc_wcortest, include = TRUE, results = "hide"}
 add_cortest_cols <- function(data = NULL) {
   data %>%
-    group_by(grp) %>% 
-    nest() %>% 
-    mutate(cortest = purrr::map(data, ~broom::tidy(cor.test(.$x0, .$y0, method = "spearman")))) %>% 
-    unnest(cortest, .drop = TRUE) %>% 
+    group_by(grp) %>%
+    nest() %>%
+    mutate(cortest =
+             purrr::map(data, ~ broom::tidy(cor.test(.$x0, .$y0, method = "spearman")))
+    ) %>%
+    unnest(cortest, .drop = TRUE) %>%
     select(grp, estimate, p.value)
 }
 summarise_mntc_wcortest <- function(data = NULL) {
@@ -777,7 +801,8 @@ viz_summ_mntc_wcortest
 ```{r viz_summ_mntc_wcortest_export, include = TRUE}
 teproj::export_ext_png(
   viz_summ_mntc_wcortest,
-  dir = "figs",
+  dir = params$dir_viz,
+  export = params$export_viz,
   units = "in",
   width = 10,
   height = 10
@@ -811,10 +836,10 @@ summ_mntc_byn <-
 ```
 
 ```{r summ_mntc_byn_export, eval = FALSE}
-readr::write_csv(summ_mntc_byn, file.path("data", "summ_mntc_byn.csv"))
+readr::write_csv(summ_mntc_byn, file.path(params$dir_data, "summ_mntc_byn.csv"))
 ```
 ```{r summ_mntc_byn_import, include = TRUE, echo = FALSE}
-summ_mntc_byn <- readr::read_csv(file.path("data", "summ_mntc_byn.csv"))
+summ_mntc_byn <- readr::read_csv(file.path(params$dir_data, "summ_mntc_byn.csv"))
 ```
 
 ```{r summ_mntc_byn_debug, eval = FALSE}
@@ -860,7 +885,7 @@ summ_mntc_byn %>%
   count(n, abs(estimate), p.value, mntc_tier2) %>% 
   add_n_pct_col() %>% 
   arrange(n, mntc_tier2) %>% 
-   mutate_if(is.numeric, funs(round(., 1))) %>% 
+  mutate_if(is.numeric, funs(round(., 1))) %>% 
   create_kable(20)
 ```
 
@@ -873,7 +898,7 @@ viz_mntc_distinv_byn <-
   mutate(n = paste0("n = ", n)) %>% 
   ggplot(aes(x = mntc_distinv)) +
   geom_histogram(bins = 20) +
-  theme_base +
+  theme_base() +
   facet_wrap( ~ n, scales = "free") +
   labs(title = lab_title_mntc_distinv_byn)
 viz_mntc_distinv_byn
@@ -882,35 +907,40 @@ viz_mntc_distinv_byn
 ```{r viz_mntc_distinv_byn_export, include = TRUE}
 teproj::export_ext_png(
   viz_mntc_distinv_byn,
-  dir = "figs",
+  dir = params$dir_viz,
+  export = params$export_viz,
   units = "in",
   width = 8,
   height = 6
 )
 ```
 
-```{r viz_mntc_tier2_byn, include = TRUE, echo = FALSE, fig.height = 6, fig.width = 8}
+```{r viz_mntc_tier2_byn, include = TRUE, echo = FALSE, fig.height = 10, fig.width = 8}
 lab_title_mntc_tier2_byn <-
-  gsub("^.*,", "Distribution of P-Values,", lab_title_mntc_distinv_byn)
+  gsub("^.*,", "Distribution of Pearson's Rho T-Test\nEstimates and P-Values,", lab_title_mntc_distinv_byn)
 lab_subtitle_mntc_tier2_byn <-
-  "By Custom Heuristic Classification"
+  # "Colored By Custom Heuristic Classification"
+  NULL
 lab_caption_mntc_tier2_byn <-
   paste0(
-    "Expectation: Green more dense near 0 (right); red more dense near 1 (left).\n",
+    "Estimate expectation: yellow more dense near 1 (right); purple mre dense near -1 (left).\n",
+    "P-value expectation: yellow more dense near 0 (left); purple more dense near 1 (right).\n",
     "Caveat: Small sample size (i.e. lack of unique p-values)."
   )
 
 viz_mntc_tier2_byn <-
   summ_mntc_byn %>%
   mutate(n = paste0("n = ", n)) %>% 
+  gather(metric, value, estimate, p.value) %>% 
   # count(n, p.value, mntc_tier2) %>% 
-  ggplot(aes(x = p.value, fill = mntc_tier2)) +
-  geom_histogram(bins = 20) +
-  # geom_bar(aes(y = ..count..)) +
+  ggplot(aes(x = value, fill = mntc_tier2)) +
+  # geom_histogram(bins = 20) +
+  geom_bar(aes(y = ..count..), color = "black") +
   # geom_col(aes(y = ..density..)) +
-  scale_fill_manual(values = c("red", "green")) +
-  facet_wrap( ~ n, scales = "free_y") +
-  theme_base +
+  scale_fill_manual(values = c("purple", "yellow")) +
+  facet_grid(n ~ metric, scales = "free") +
+  theme_base() +
+  theme(legend.text = element_text(size = 12)) +
   labs(
     title = lab_title_mntc_tier2_byn,
     subtitle = lab_subtitle_mntc_tier2_byn,
@@ -922,10 +952,11 @@ viz_mntc_tier2_byn
 ```{r viz_mntc_tier2_byn_export, include = TRUE}
 teproj::export_ext_png(
   viz_mntc_tier2_byn,
-  dir = "figs",
+  dir = params$dir_viz,
+  export = params$export_viz,
   units = "in",
   width = 8,
-  height = 6
+  height = 10
 )
 ```
 
@@ -962,7 +993,7 @@ a "relaxed" definition of monotonocity, so having only a very small percentage o
 rank combinations meet the criteria would have actually been undesireable.
 
 ```{r save_session}
-save.image(file = file.path("data", "rank-regression-1.RData"))
+save.image(file = file.path(params$dir_data, "rank-regression-1.RData"))
 ```
 
 ## Conclusion
