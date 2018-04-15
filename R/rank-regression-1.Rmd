@@ -176,7 +176,7 @@ Given the nature of the data (which one might say is non linear) and my
 intent to quantify ordinality between two variables, it turns out that
 [_Spearman's rho_](https://en.wikipedia.org/wiki/Spearman%27s_rank_correlation_coefficient),
 in theory, provides exactly the measurement that I want---it quantifies the association
-between parised samples using the ranking of the variables (not their values).
+between paired samples using the ranking of the variables (not their values).
 Additionally, it can be used to calculate statistical significance (i.e. a p-value)
 (traditionally, using a [t-test](https://en.wikipedia.org/wiki/Student%27s_t-test)). 
 Nonetheless, even though this metric seems promisable, it will certainly be
@@ -225,15 +225,15 @@ I thought that I would try to create some kind of easily-understandable heuristi
 that I might be able to explain to someone else 
 without having to delve into statistical theory.
 Nonetheless, I would be ignorant to not compare (and validate) the results of my heurisitc
-with those of statisical theory.
+with those of statistical theory.
 
 ## Devising a Heuristic
 
 Having this plan in mind, I began to think about how I would define my heuristic,
 which, in essence, tries to quantify [__monotocity__](https://en.wikipedia.org/wiki/Monotonic_function).
-But what exactly constitutes monotocity? Suprisingly, that's a more complex
+But what exactly constitutes monoticity? Surprisingly, that's a more complex
 question than it might seem. [^mntc_complexity]
-(For example, did you know that numbers may be strictly or weakly monotic?)
+(For example, did you know that numbers may be strictly or weakly monotonic?)
 
 [^mntc_complexity]:
 I'll leave the reader to dive into all of the theory.
@@ -247,22 +247,22 @@ On the the hand,
 I would consider something like  `4`, `2`, `3`, `1` because the `1` and `4` are
 "badly" misplaced in one another's appropriate places, which are at the extreme ends of the sequence.
 Moreover, if I was intent identifying
-increasing monoticity (as opposed to decreasing monotocity),
+increasing monoticity (as opposed to decreasing monotonicity),
 I would consider `4`, `3`, `2`, `1` "bad", even though it is strictly
 monotonically decreasing. But what about something like `1`, `4`, `3`, `2` (again, assuming
-that I am evaluating increasing monotocity)? Even though the
+that I am evaluating increasing monotonicity)? Even though the
 `2` and `4` are swapped, I might still consider this sequence sufficiently monotonic 
 because the `1` and `3` are placed correctly and the `2` and `4` are not "too far apart".
 
 It's easy to see how having some kind of formal definition/calculation/criteria for
-monotocity is handy.
+monotonicity is handy.
 
 ### The "Algorithm"
 
 After some thinking,
 I came up with the following algorithm (if one can even call it that).
 
-(__NOTE:__ I explicity list the variable names that I use in the code implementation to help
+(__NOTE:__ I explicitly list the variable names that I use in the code implementation to help
 with orientation.)
 
 1. Given an `n`-length sequence of arbitrary values, assign each value
@@ -298,13 +298,13 @@ Subtract this distance from the maximum rank value in the sequence. This value i
 
 5. Sum up the inverse monotonic distance for each value in the permutation group and
 take the average of this sum for each group. [^sum_or_avg]
-Rescale this per-group value to a 0 to 1 basis. [^rescale] (in the code that follows,
+Re-scale this per-group value to a 0 to 1 basis. [^re-scale] (in the code that follows,
 I re-use the variable name `mntc_distinv` for this transformed value.)
 
-6. Identify any group (`grp`) corresponding to a sum-averaged-rescaled value
+6. Identify any group (`grp`) corresponding to a sum-averaged-re-scaled value
 (`mntc_distinv`) in the upper 50% quantile of all values
 (i.e. assigned the value `"(0.5,1]"` for the `mntc_tier2` variable)
-as "sufficiently" __monotonic__. (This `mntc_tier2` varaible can be interpreted as the heuristic.)
+as "sufficiently" __monotonic__. (This `mntc_tier2` variable can be interpreted as the heuristic.)
 
 [^rank_init]:
 In reality, the rank values could also be any arbitrary value on the real number scale.
@@ -313,12 +313,12 @@ In reality, the rank values could also be any arbitrary value on the real number
 A sum of sums (instead of an average of sums) could be used here and the subsequent
 results would not change.
 
-[^rescale]:
+[^re-scale]:
 This is not completely necessary, but I believe that it makes the computation(s) and
 the calculated values
 "generalizable" for any `n`-length sequence.
 
-Notably, even though the result set is split at the 50% thresshold (which is a subjective choice),
+Notably, even though the result set is split at the 50% threshold (which is a subjective choice),
 this does not mean that 50& of all possible groups are classified as 50&.
 (According to this method, only 25% are.)
 
@@ -370,7 +370,7 @@ Note(s) about the following code chunk:
 + Although the values to be evaluated for monoticity (`x0`) could be any real numbers,
 I'm using values between `1` and `n` because my methodology dictates that the arbitrary
 set of values would need to be transformed to this range anyways. When transformed to this
-range, the values should be interprted as ranks (the "acutal" ranks).
+range, the values should be interpreted as ranks (the "actual" ranks).
 + Like the "actual" `x0` ranks (representing the order of the original, arbitrary values),
 the "guessed" `y0` ranks could technically be any real numbers, but they
 would need to be transformed to the `1`-to-`n` range, so I do that directly.
@@ -426,7 +426,7 @@ Now, I implement the initial calculation of "inverse monotonic distance" (`mntc_
 Note(s) about the following code chunk:
 
 + The `mntc` variable is a "running" binary `1` or `0` to indicate whether or not
-`y0` is monotonic up throught its position in the sequence. (It does not differentiate
+`y0` is monotonic up through its position in the sequence. (It does not differentiate
 between increasing or decreasing.)
 
 
@@ -460,7 +460,7 @@ data_mntc %>% count(mntc_distinv, sort = TRUE)
 ```
 
 
-Next is the calculation of the transformed (i.e. summed-averaged-rescaled) version 
+Next is the calculation of the transformed (i.e. summed-averaged-re-scaled) version 
 of the "inverse monotonic distance" (`mntc_distinv`),
 as well as the split of the `mntc_distinv` into upper and lower 50% quantiles (`mntc_tier2`).
 
@@ -610,13 +610,13 @@ Note(s) about the above code chunk:
 + By taking the absolute value of the estimate, I am essentially treating
 monotonically increasing and decreasing as equal.
 + There are only `n + 1` (i.e. `r n + 1` unique `abs(estimate)`s and `p.value`s.
-This result is generally true for the simulation performend.
+This result is generally true for the simulation performed.
 (For example, if I chose `n = 5` initially, then there would be `6` unique values of each metric.)
 
-Now, to understand how the _Pearson's rho_ estimate and p-values correspond to my hueristic,
+Now, to understand how the _Pearson's rho_ estimate and p-values correspond to my heuristic,
 I'll simply overlay the combinations that are identified as significant to my
-previous heatmap of rank combinations. Because I'm erring on the side of flexibility
-in defining "sufficient" monotocity, I'll say that the pairs corresponding to the
+previous heat map of rank combinations. Because I'm erring on the side of flexibility
+in defining "sufficient" monotonicity, I'll say that the pairs corresponding to the
 bottom two tiers of p-values
 (corresponding to `0.0833` and `0.33`) constitute "sufficient" monoticity. 
 
@@ -654,7 +654,7 @@ save.image(file = file.path("data", "rank-regression-1.RData"))
 ```
 
 In conclusion, it looks like there is a large amount of overlap between my heuristic
-classification of "suficient" monoticity and that identified by a more statistical 
+classification of "sufficient" monoticity and that identified by a more statistical 
 approach--a t-test using _Spearman's rho_. In the end, I think I did more work than
 I really needed to, but I think, in all, it was a worthwhile exploration.
 

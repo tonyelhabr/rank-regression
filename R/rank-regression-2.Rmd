@@ -37,7 +37,7 @@ library("teplot")
 ```
 
 Even though I have already deduced that linear regression is not appropriate
-for quantifying monotocity with small samples of ordinal data,
+for quantifying monotonicity with small samples of ordinal data,
 I still wondered what kind of results it might produce. Also, I figured
 that this might be a good opportunity to practice the
 ["many models"](http://r4ds.had.co.nz/many-models.html) approach
@@ -55,19 +55,19 @@ be useful, I'll try a couple different variations of transforming the data.
 In particular, I'll evaluate linear models after transforming the data
 in four different ways:
 
-1) Rescaling the x- and y-ranks to the range `[0, 1]`.
+1) Re-scaling the x- and y-ranks to the range `[0, 1]`.
 (This seems like the best approach to me, but I'm not sure.)
 
-2) Rescaling to the range `[-1, 1]`.
+2) Re-scaling to the range `[-1, 1]`.
 (This seems like it might generate similar results the previous method,
 but perhaps it is "more accurate" for representing values that may be negative.)
 
-3) Rescaling to the range `[1, 2 * n]`
+3) Re-scaling to the range `[1, 2 * n]`
 (I would not really bother attempting this in a non-experimental setting
-because it needlessly mangifies the range. Nonetheless, I am curious to see how
+because it needlessly magnifies the range. Nonetheless, I am curious to see how
 the estimation of coefficients and p-values changes.)
 
-4) Rescaling to the range `[-2 * n, 2 * n]`.
+4) Re-scaling to the range `[-2 * n, 2 * n]`.
 (As with the previous method, I would not really try this if I were serious,
 but I'm curious to see what it turns out.)
 
@@ -132,15 +132,15 @@ beginning with model fitting.
 Note(s) on the code chunk below:
 
 + This is another ideal case for using `purrr::partial()`.
-(Unforutnatley, I could not quite figure out how to eliminate the 
+(Unfortunately, I could not quite figure out how to eliminate the 
 redundancy with the explicit formulas.)
 
 + I choose (perhaps foolishly) to not include an intercept term in the models
 because, theoretically, if the data is monotonic, the model should estimate the slope to be 1
 and the intercept to be 0. Thus, when the data is not actually monotonic, I can
 roughly estimate the relationship of the predictor and the response variables
-by how much the esimtated slope differs from 1, given that the intercept is held
-constant at 0. (This line of thinking may be completely non-sensical to the reader,
+by how much the estimated slope differs from 1, given that the intercept is held
+constant at 0. (This line of thinking may be completely nonsensical to the reader,
 but it makes sense to me.)
 
 
