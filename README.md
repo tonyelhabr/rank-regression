@@ -16,6 +16,8 @@ Highlights
 
 Here are a couple of the coolest visualization, in my opinion.
 
-![](figs/viz_summ_mntc_mod_0.png)
+![](figs/viz_summ_mntc_wcortest.png)
 
-![](figs/viz_est_vs_pv.png)
+![](figs/viz_mntc_distinv_byn.png)
+
+![](figs/viz_mntc_tier2_byn.png)

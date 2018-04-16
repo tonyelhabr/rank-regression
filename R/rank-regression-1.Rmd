@@ -99,9 +99,6 @@ create_kable <-
 }
 ```
 
-__NOTE:__ This write-up is split into two parts. This first part constitutes the "meat"
-part of the analysis, while the second part is really just supplementary.
-
 ## The Problem
 
 I have a bunch of data that can be categorized into many small __groups__.
@@ -451,11 +448,11 @@ and results remain valid for any integer.)
 [^trial_error]:
 I realized this through some trial and error.
 
-```{r params}
+```{r n}
 n <- 4L
 ```
 
-```{r params_info}
+```{r n_combns}
 n_combns <- factorial(n) * factorial(n)
 n_rows <- n * n_combns
 ```
@@ -844,7 +841,28 @@ summ_mntc_byn <- readr::read_csv(file.path(params$dir_data, "summ_mntc_byn.csv")
 
 ```{r summ_mntc_byn_debug, eval = FALSE}
 summ_mntc_byn %>% 
-  filter(n == 4) %>% 
+  filter(n == 5) %>% 
+  ggplot(aes(x = estimate)) +
+  geom_density()
+
+summ_mntc_byn %>%
+  filter(n == 5) %>% 
+  mutate(estimate_abs = abs(estimate)) %>% 
+  count(n, estimate_abs >= 0.5, sort = TRUE) %>% 
+  group_by(n) %>% 
+  mutate(nn_pct = 100 * (nn / sum(nn))) %>% 
+  ungroup()
+summ_mntc_byn %>%
+  filter(n == 5) %>% 
+  mutate(estimate_abs = abs(estimate)) %>% 
+  filter(estimate_abs >= 0.8) %>% 
+  count(n, estimate_abs, p.value, sort = TRUE) %>% 
+  group_by(n) %>% 
+  mutate(nn_pct = 100 * (nn / sum(nn))) %>% 
+  ungroup()
+
+summ_mntc_byn %>% 
+  filter(n == 5) %>% 
   mutate(estimate_abs = abs(estimate)) %>% 
   select(mntc_distinv, estimate_abs, p.value) %>%
   corrr::correlate()
@@ -897,8 +915,9 @@ viz_mntc_distinv_byn <-
   summ_mntc_byn %>% 
   mutate(n = paste0("n = ", n)) %>% 
   ggplot(aes(x = mntc_distinv)) +
-  geom_histogram(bins = 20) +
+  geom_histogram(bins = 20, color = "black") +
   theme_base() +
+  theme(panel.background = element_rect()) +
   facet_wrap( ~ n, scales = "free") +
   labs(title = lab_title_mntc_distinv_byn)
 viz_mntc_distinv_byn
@@ -915,12 +934,12 @@ teproj::export_ext_png(
 )
 ```
 
-```{r viz_mntc_tier2_byn, include = TRUE, echo = FALSE, fig.height = 10, fig.width = 8}
+```{r viz_mntc_tier2_byn, include = TRUE, echo = FALSE, fig.height = 8, fig.width = 6}
 lab_title_mntc_tier2_byn <-
   gsub("^.*,", "Distribution of Pearson's Rho T-Test\nEstimates and P-Values,", lab_title_mntc_distinv_byn)
 lab_subtitle_mntc_tier2_byn <-
-  # "Colored By Custom Heuristic Classification"
-  NULL
+  "Colored According to Custom Heuristic Classification"
+  # NULL
 lab_caption_mntc_tier2_byn <-
   paste0(
     "Estimate expectation: yellow more dense near 1 (right); purple mre dense near -1 (left).\n",
@@ -930,17 +949,19 @@ lab_caption_mntc_tier2_byn <-
 
 viz_mntc_tier2_byn <-
   summ_mntc_byn %>%
+  # mutate_at(vars(p.value), funs(if_else(. >= 1, 0.9, .))) %>% 
   mutate(n = paste0("n = ", n)) %>% 
   gather(metric, value, estimate, p.value) %>% 
   # count(n, p.value, mntc_tier2) %>% 
   ggplot(aes(x = value, fill = mntc_tier2)) +
-  # geom_histogram(bins = 20) +
-  geom_bar(aes(y = ..count..), color = "black") +
+  geom_histogram(bins = 25, color = "black") +
+  # geom_bar(aes(y = ..count..), color = "black") +
   # geom_col(aes(y = ..density..)) +
   scale_fill_manual(values = c("purple", "yellow")) +
   facet_grid(n ~ metric, scales = "free") +
   theme_base() +
-  theme(legend.text = element_text(size = 12)) +
+  theme(panel.background = element_rect()) +
+  # xlim(-1, 1) +
   labs(
     title = lab_title_mntc_tier2_byn,
     subtitle = lab_subtitle_mntc_tier2_byn,
@@ -955,8 +976,8 @@ teproj::export_ext_png(
   dir = params$dir_viz,
   export = params$export_viz,
   units = "in",
-  width = 8,
-  height = 10
+  width = 6,
+  height = 8
 )
 ```
 
