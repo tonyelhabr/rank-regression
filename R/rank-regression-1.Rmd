@@ -32,8 +32,9 @@ knitr::opts_chunk$set(
 params <-
   list(
     dir_data = "data",
+    export_data = FALSE,
     dir_viz = "figs",
-    export_viz = TRUE
+    export_viz = FALSE
   )
 ```
 
@@ -833,10 +834,18 @@ summ_mntc_byn <-
 ```
 
 ```{r summ_mntc_byn_export, eval = FALSE}
-readr::write_csv(summ_mntc_byn, file.path(params$dir_data, "summ_mntc_byn.csv"))
+teproj::export_ext_csv(
+  summ_mntc_byn,
+  dir = params$dir_data,
+  export = params$export_data
+)
 ```
 ```{r summ_mntc_byn_import, include = TRUE, echo = FALSE}
-summ_mntc_byn <- readr::read_csv(file.path(params$dir_data, "summ_mntc_byn.csv"))
+# summ_mntc_byn <- readr::read_csv(file.path(params$dir_data, "summ_mntc_byn.csv"))
+teproj::import_ext_csv(
+  summ_mntc_byn,
+  dir = params$dir_data
+)
 ```
 
 ```{r summ_mntc_byn_debug, eval = FALSE}
@@ -1014,7 +1023,9 @@ a "relaxed" definition of monotonocity, so having only a very small percentage o
 rank combinations meet the criteria would have actually been undesireable.
 
 ```{r save_session}
-save.image(file = file.path(params$dir_data, "rank-regression-1.RData"))
+if(params$export_data) {
+  save.image(file = file.path(params$dir_data, "rank-regression-1.RData"))
+}
 ```
 
 ## Conclusion
